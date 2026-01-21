@@ -92,13 +92,19 @@ resource "aws_vpc_security_group_ingress_rule" "allow_alb_to_ec2" {
     from_port = var.port_http
     ip_protocol = "tcp"
     to_port = var.port_http
-    cidr_ipv4 = aws_subnet.private_subnet.cidr_block
+    cidr_ipv4         = aws_vpc.terraform_infra_vpc.cidr_block
+}
+
+resource "aws_vpc_security_group_egress_rule" "alb_to_ec2" {
+  security_group_id = aws_security_group.alb_sg.id
+  ip_protocol       = "tcp"
+  from_port         = var.port_http
+  to_port           = var.port_http
+  referenced_security_group_id = aws_security_group.private_ec2_sg.id
 }
 
 resource "aws_vpc_security_group_egress_rule" "allow_traffic_to_internet" {
   security_group_id = aws_security_group.private_ec2_sg.id
-  from_port = var.port_0
-  to_port = var.port_0
   ip_protocol = var.allow_all_protocol
   cidr_ipv4 = var.allow_all_cidr
 }
@@ -200,14 +206,21 @@ resource "aws_lb_target_group" "terraform_infra_tg"{
     protocol = var.protocol_http
     vpc_id = aws_vpc.terraform_infra_vpc.id
 
-    target_health_state {
-        enable_unhealthy_connection_termination = true
-    }
+    health_check {
+    path                = "/index.html"
+    matcher             = "200-399"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+  }
 }
+
 
 resource "aws_lb_target_group_attachment" "tg_attachment"{
     target_group_arn = aws_lb_target_group.terraform_infra_tg.arn
     target_id = aws_instance.private_ec2_instance.id
+    port = var.port_http
 }
 
 #Instance creation in private subnet
@@ -216,11 +229,13 @@ resource "aws_instance" "private_ec2_instance" {
   ami = var.ami_id
   subnet_id = aws_subnet.private_subnet.id
   vpc_security_group_ids = [aws_security_group.private_ec2_sg.id]
+  iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
 
   user_data = file("user-data.sh")
 
   tags = {
-    name = "${var.project}-instance"
+    Name = "${var.project}-instance"
     Environment = var.environment
   }
 }
+
